@@ -1,0 +1,389 @@
+/**
+ * batchMovesetCounter
+ *
+ * Reads per-species moveset data (created by batchLogReader) from gzipped
+ * intermediate files and generates human-readable moveset stats, as well as
+ * JSON "chaos" stats for a more complete picture.
+ *
+ * Usage:
+ *   node dist/batchMovesetCounter.js <tier> [cutoff] [teamtype]
+ *   node dist/batchMovesetCounter.js gen9ou > Stats/moveset/gen9ou.txt
+ *   node dist/batchMovesetCounter.js gen9ou 1695 > Stats/moveset/gen9ou-1695.txt
+ */
+
+import * as fs from 'fs';
+import * as path from 'path';
+import * as zlib from 'zlib';
+import { keyify, weighting, readTable, reverseAliases, victoryChance } from './common';
+import { nmod, statFormula, baseStats } from './TA';
+
+interface MovesetEntry {
+  trainer: string;
+  level: number;
+  ability: string;
+  item: string;
+  teraType: string;
+  nature: string;
+  ivs: Record<string, number>;
+  evs: Record<string, number>;
+  moves: string[];
+  happiness: number;
+  tags: string[];
+  rating?: { rpr?: number; rprd?: number };
+  outcome?: 'win' | 'loss';
+}
+
+interface ChecksCountersEntry {
+  n: number;
+  p: number;
+  d: number;
+}
+
+interface MovesetStuffOutput {
+  'Raw count': number;
+  'Viability Ceiling': [number, number, number, number];
+  Abilities: Record<string, number>;
+  Items: Record<string, number>;
+  Spreads: Record<string, number>;
+  Moves: Record<string, number>;
+  'Tera Types': Record<string, number>;
+  Happiness: Record<number, number>;
+  Teammates: Record<string, number>;
+  'Checks and Counters': Record<string, ChecksCountersEntry>;
+  usage?: number;
+}
+
+const keyLookup: Record<string, string> = JSON.parse(fs.readFileSync('keylookup.json', 'utf-8'));
+keyLookup['nothing'] = 'Nothing';
+keyLookup[''] = 'Nothing';
+
+const EV_STATS = ['hp', 'atk', 'def', 'spa', 'spd', 'spe'] as const;
+const NATURE_STAT_IDS = { hp: -1, atk: 0, def: 1, spa: 2, spd: 3, spe: 4 };
+const NEUTRAL_NATURES = new Set(['serious', 'docile', 'quirky', 'bashful']);
+
+const args = process.argv.slice(2);
+if (args.length < 1) {
+  process.stderr.write('Usage: batchMovesetCounter.ts <tier> [cutoff] [teamtype]\n');
+  process.exit(1);
+}
+
+const tier = args[0];
+const cutoff = args.length > 1 ? parseFloat(args[1]) : 1500;
+const cutoffDeviation = 0;
+const teamtype = args.length > 2 ? keyify(args[2]) : null;
+
+let specs = '-';
+if (teamtype) specs += teamtype + '-';
+specs += Math.round(cutoff).toString();
+
+function loadJSON<T>(filepath: string): T {
+  return JSON.parse(fs.readFileSync(filepath, 'utf-8')) as T;
+}
+const teammateMatrix: Record<string, Record<string, number>> = loadJSON(
+  `Raw/moveset/${tier}/teammate${specs}.json`
+);
+const encounterMatrix: Record<string, Record<string, number[]>> = loadJSON(
+  `Raw/moveset/${tier}/encounterMatrix${specs}.json`
+);
+
+const [usage, nBattles] = readTable(`Stats/${tier}${specs}.txt`);
+
+function movesetCounter(
+  filename: string,
+  cutoffArg: number,
+  teamtypeArg: string | null,
+  usageArg: Record<string, number>
+): MovesetStuffOutput {
+  const raw = zlib.gunzipSync(fs.readFileSync(filename)).toString('utf-8');
+
+  const chunks = raw.split('][').map((chunk, i, arr) => {
+    if (i > 0) chunk = '[' + chunk;
+    if (i < arr.length - 1) chunk = chunk + ']';
+    return chunk;
+  });
+
+  const species = keyLookup[path.basename(filename)];
+  const speciesName = reverseAliases[species] ?? species;
+  const speciesKey = keyify(speciesName);
+
+  const abilities: Record<string, number> = {};
+  const items: Record<string, number> = {};
+  const happinesses: Record<number, number> = {};
+  const spreads: Record<string, number> = {};
+  const moves: Record<string, number> = {};
+  const teraTypes: Record<string, number> = {};
+  let weightSum = 0;
+  let weightCount = 0;
+  const gxes: Record<string, number> = {};
+  let rawCount = 0;
+
+  for (const chunk of chunks) {
+    const movesets: MovesetEntry[] = JSON.parse(chunk);
+    for (const moveset of movesets) {
+      if (teamtypeArg && !moveset.tags.includes(teamtypeArg)) continue;
+
+      rawCount++;
+      let weight = weighting(1500.0, 130.0, cutoffArg);
+
+      if (moveset.rating) {
+        const { rpr, rprd } = moveset.rating;
+        if (rpr !== undefined && rprd !== undefined) {
+          const gxe = Math.round(100 * victoryChance(rpr, rprd, 1500.0, 130.0));
+
+          let addMe = true;
+          if (moveset.trainer in gxes && gxes[moveset.trainer] > gxe) addMe = false;
+          if (addMe) gxes[moveset.trainer] = gxe;
+
+          if (rprd !== 0.0) {
+            weight = weighting(rpr, rprd, cutoffArg);
+            weightSum += weight;
+            weightCount++;
+          }
+        }
+      } else if (moveset.outcome) {
+        if (moveset.outcome === 'win')
+          weight = weighting(1540.16061434, 122.858308077, cutoffArg);
+        else if (moveset.outcome === 'loss')
+          weight = weighting(1459.83938566, 122.858308077, cutoffArg);
+      } // else it's a tie, and we use 1500
+
+      if (!(moveset.ability in keyLookup)) moveset.ability = 'illuminate';
+      abilities[moveset.ability] = (abilities[moveset.ability] ?? 0) + weight;
+
+      if (!(moveset.item in keyLookup)) moveset.item = 'nothing';
+      items[moveset.item] = (items[moveset.item] ?? 0) + weight;
+
+      let nature = moveset.nature;
+      if (NEUTRAL_NATURES.has(nature) || !(nature in keyLookup)) {
+        nature = 'hardy';
+      }
+
+      // round the EVs
+      for (const stat of EV_STATS) {
+        const natIdx = NATURE_STAT_IDS[stat];
+        const n = natIdx === -1 ? -1 : nmod[nature][natIdx];
+        const base = baseStats[speciesKey][stat];
+        const iv = moveset.ivs[stat];
+        let ev = Math.floor(moveset.evs[stat] / 4) * 4;
+        const targetStat = statFormula(base, moveset.level, n, iv, ev);
+        while (ev >= 4) {
+          ev -= 4;
+          if (targetStat !== statFormula(base, moveset.level, n, iv, ev)) {
+            ev += 4;
+            break;
+          }
+        }
+        moveset.evs[stat] = ev;
+      }
+
+      const spreadNature = keyLookup[nature] ?? nature;
+      const { hp, atk, def, spa, spd, spe } = moveset.evs;
+      const spread = `${spreadNature}:${hp}/${atk}/${def}/${spa}/${spd}/${spe}`;
+      spreads[spread] = (spreads[spread] ?? 0) + weight;
+
+      for (const move of moveset.moves) {
+        if (move in keyLookup) {
+          moves[move] = (moves[move] ?? 0) + weight;
+        }
+      }
+
+      happinesses[moveset.happiness] = (happinesses[moveset.happiness] ?? 0) + weight;
+
+      const tera = moveset.teraType;
+      teraTypes[tera] = (teraTypes[tera] ?? 0) + weight;
+    }
+  }
+
+  const count = Object.values(abilities).reduce((a, b) => a + b, 0);
+  const sortedGXEs = Object.values(gxes).sort((a, b) => b - a);
+
+  // teammate stats
+  let teammates: Record<string, number>;
+  if (speciesName in teammateMatrix) {
+    teammates = { ...teammateMatrix[speciesName] };
+  } else {
+    process.stderr.write(`No teammates data for ${filename} (${cutoffArg})\n`);
+    teammates = {};
+  }
+  for (const s of Object.keys(teammates)) {
+    if (!(s in usageArg)) teammates[s] = 0.0;
+  }
+
+  // checks and counters
+  const cc: Record<string, ChecksCountersEntry> = {};
+  if (speciesName in encounterMatrix) {
+    for (const [s, matchup] of Object.entries(encounterMatrix[speciesName])) {
+      // number of times species is KOed by s + number of times species switches out against s over number
+      // of times either (or both) is switched out or KOed (don't count u-turn KOs or force-outs)
+      const n = matchup.slice(0, 6).reduce((a, b) => a + b, 0);
+      if (n > 20) {
+        const p = (matchup[0] + matchup[3]) / n;
+        const d = Math.sqrt(p * (1.0 - p) / n);
+        // cc[s] = p - 4 * d; // using a CRE-style calculation
+        cc[s] = { n, p, d };
+      }
+    }
+  }
+
+  const maxGXE: [number, number, number, number] = [0, 0, 0, 0];
+  if (sortedGXEs.length > 0) {
+    maxGXE[0] = sortedGXEs.length;
+    maxGXE[1] = sortedGXEs[0];
+    maxGXE[2] = sortedGXEs[Math.ceil(0.01 * sortedGXEs.length) - 1];
+    maxGXE[3] = sortedGXEs[Math.ceil(0.20 * sortedGXEs.length) - 1];
+  }
+
+  const stuff: MovesetStuffOutput = {
+    'Raw count': rawCount,
+    'Viability Ceiling': maxGXE,
+    Abilities: abilities,
+    Items: items,
+    Spreads: spreads,
+    Moves: moves,
+    'Tera Types': teraTypes,
+    Happiness: happinesses,
+    Teammates: teammates,
+    'Checks and Counters': cc,
+  };
+
+  // print tables
+  const tablewidth = 40;
+  const separator = '+' + '-'.repeat(tablewidth) + '+';
+  const padLine = (s: string) => s.padEnd(tablewidth + 1) + '|';
+
+  console.log(separator);
+  console.log(padLine(`| ${speciesName}`));
+  console.log(separator);
+  console.log(padLine(`| Raw count: ${rawCount}`));
+  console.log(padLine(`| Avg. weight: ${weightCount > 0 ? (weightSum / weightCount).toString() : '---'}`));
+  console.log(padLine(`| Viability Ceiling: ${maxGXE[1]}`));
+  console.log(separator);
+
+  const sections = ['Abilities','Items','Spreads','Moves','Tera Types','Teammates','Checks and Counters'] as const;
+
+  const rowLimits: Partial<Record<typeof sections[number], number>> = {
+    Abilities: 5, Spreads: 5, Teammates: 9, 'Checks and Counters': 10,
+  };
+
+  for (const x of sections) {
+    // skip Tera Types if the only entry is "Nothing"
+    if (x === 'Tera Types') {
+      const teraEntries = Object.entries(stuff['Tera Types']);
+      const onlyNothing = teraEntries.length === 1 && keyify(teraEntries[0][0]) === 'nothing';
+      if (onlyNothing) continue;
+    }
+
+    // skip Checks and Counters if it would be empty
+    if (x === 'Checks and Counters') {
+      const hasEntries = Object.values(cc).some(entry => entry.p - 4.0 * entry.d >= 0.5);
+      if (!hasEntries) continue;
+    }
+
+    console.log(`| ${x}`.padEnd(tablewidth + 1) + '|');
+
+    type TableRow = [string, number | ChecksCountersEntry];
+    let table: TableRow[];
+
+    if (x === 'Checks and Counters') {
+      table = Object.entries(cc).map(([k, v]) => [k, v] as TableRow);
+      table.sort((a, b) => {
+        const av = a[1] as ChecksCountersEntry;
+        const bv = b[1] as ChecksCountersEntry;
+        return (bv.p - 4.0 * bv.d) - (av.p - 4.0 * av.d);
+      });
+    } else if (x === 'Tera Types') {
+      table = Object.entries(stuff[x]).map(([k, v]) => [k.charAt(0).toUpperCase() + k.slice(1), v] as TableRow);
+      table.sort((a, b) => (b[1] as number) - (a[1] as number));
+    } else if (x === 'Spreads' || x === 'Teammates') {
+      table = Object.entries(stuff[x]).map(([k, v]) => [k, v] as TableRow);
+      table.sort((a, b) => (b[1] as number) - (a[1] as number));
+    } else {
+      const src = stuff[x] as Record<string, number>;
+      table = Object.entries(src).map(([k, v]) => [keyLookup[k] ?? k, v] as TableRow);
+      table.sort((a, b) => (b[1] as number) - (a[1] as number));
+    }
+
+    const limit = rowLimits[x] ?? Infinity;
+    let total = 0.0;
+
+    for (let i = 0; i < table.length; i++) {
+      const [name, val] = table[i];
+      const isCapped = i > limit || (total > 0.95 && x !== 'Abilities');
+
+      if (isCapped) {
+        if (x !== 'Teammates' && x !== 'Checks and Counters') {
+          const otherPct = x === 'Moves' ? 400.0 * (1.0 - total) : 100.0 * (1.0 - total);
+          console.log(padLine(`| Other ${otherPct.toFixed(3)}%`));
+        }
+        break;
+      }
+
+      let line: string;
+      if (x === 'Checks and Counters') {
+        const ccEntry = val as ChecksCountersEntry;
+        const score = ccEntry.p - 4.0 * ccEntry.d;
+        if (score < 0.5) break;
+        const matchup = encounterMatrix[speciesName]?.[name] ?? [];
+        const n = matchup.slice(0, 6).reduce((a, b) => a + b, 0);
+        const koRate    = 100.0 * matchup[0] / n;
+        const switchRate = 100.0 * matchup[3] / n;
+        line = `| ${name} ${(100.0 * score).toFixed(3)} (${(100.0 * ccEntry.p).toFixed(2)}\u00b1${(100 * ccEntry.d).toFixed(2)})`.padEnd(tablewidth + 1) + '|';
+        line += `\n|\t(${koRate.toFixed(1)}% KOed / ${switchRate.toFixed(1)}% switched out)`;
+        if (koRate    < 10.0) line += ' ';
+        if (switchRate < 10.0) line += ' ';
+      } else if (x === 'Teammates') {
+        const numVal = val as number;
+        if (numVal < 0.005 * count) break;
+        line = padLine(`| ${name} ${(100.0 * numVal / count).toFixed(3)}%`);
+      } else {
+        line = padLine(`| ${name} ${(100.0 * (val as number) / count).toFixed(3)}%`);
+      }
+
+      console.log(line);
+
+      if (x === 'Moves') total += (val as number) / count / 4.0;
+      else if (x === 'Teammates') total += (val as number) / count / 5.0;
+      else if (x !== 'Checks and Counters') total += (val as number) / count;
+    }
+
+    console.log(separator);
+  }
+
+  return stuff;
+}
+
+// write chaos files
+
+let pokes: [string, number][] = Object.entries(usage);
+if (['randombattle','challengecup','challengecup1v1','seasonal'].includes(tier)) {
+  pokes.sort((a, b) => a[0].localeCompare(b[0]));
+} else {
+  pokes.sort((a, b) => b[1] - a[1]);
+}
+
+const chaos: {
+  info: { metagame: string; cutoff: number; 'cutoff deviation': number; 'team type': string | null; 'number of battles': number };
+  data: Record<string, MovesetStuffOutput>;
+} = {
+  info: {
+    metagame: tier,
+    cutoff,
+    'cutoff deviation': cutoffDeviation,
+    'team type': teamtype,
+    'number of battles': nBattles,
+  },
+  data: {},
+};
+
+for (const [pokeName, pct] of pokes) {
+  if (pct < 0.0001) break; // 1/100th of a percent
+  const filename = `Raw/moveset/${tier}/${keyify(pokeName)}`;
+  const stuffResult = movesetCounter(filename, cutoff, teamtype, usage);
+  stuffResult.usage = pct;
+  chaos.data[pokeName] = stuffResult;
+}
+
+const chaosFilename = `Stats/chaos/${tier}${specs}.json`;
+const chaosDir = path.dirname(chaosFilename);
+if (!fs.existsSync(chaosDir)) fs.mkdirSync(chaosDir, { recursive: true });
+fs.writeFileSync(chaosFilename, JSON.stringify(chaos));

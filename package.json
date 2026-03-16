@@ -1,0 +1,12 @@
+{
+  "name": "usage-stats",
+  "version": "1.0.0",
+  "description": "Scripts for compiling usage stats from Smogon's Pokemon Showdown server",
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.9.0"
+  }
+}

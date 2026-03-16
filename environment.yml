@@ -1,5 +1,0 @@
-name: sus-env3
-dependencies:
-- ipython
-- python=3.12
-- pip
