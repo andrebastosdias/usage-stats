@@ -159,21 +159,23 @@ function movesetCounter(
       }
 
       // round the EVs
-      for (const stat of EV_STATS) {
-        const natIdx = NATURE_STAT_IDS[stat];
-        const n = natIdx === -1 ? -1 : nmod[nature][natIdx];
-        const base = baseStats[speciesKey][stat];
-        const iv = moveset.ivs[stat];
-        let ev = Math.floor(moveset.evs[stat] / 4) * 4;
-        const targetStat = statFormula(base, moveset.level, n, iv, ev);
-        while (ev >= 4) {
-          ev -= 4;
-          if (targetStat !== statFormula(base, moveset.level, n, iv, ev)) {
-            ev += 4;
-            break;
+      if (!tier.startsWith('gen9champions')) {
+        for (const stat of EV_STATS) {
+          const natIdx = NATURE_STAT_IDS[stat];
+          const n = natIdx === -1 ? -1 : nmod[nature][natIdx];
+          const base = baseStats[speciesKey][stat];
+          const iv = moveset.ivs[stat];
+          let ev = Math.floor(moveset.evs[stat] / 4) * 4;
+          const targetStat = statFormula(base, moveset.level, n, iv, ev);
+          while (ev >= 4) {
+            ev -= 4;
+            if (targetStat !== statFormula(base, moveset.level, n, iv, ev)) {
+              ev += 4;
+              break;
+            }
           }
+          moveset.evs[stat] = ev;
         }
-        moveset.evs[stat] = ev;
       }
 
       const spreadNature = keyLookup[nature] ?? nature;

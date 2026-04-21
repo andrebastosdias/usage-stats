@@ -229,6 +229,9 @@ export const nonSinglesFormats: Set<string> = new Set([
   'gen8doublesou',
   'gen7doublesou',
   'gen6doublesou',
+  'gen9vgc2026regibo3',
+  'gen9championsvgc2026regma',
+  'gen9championsvgc2026regmabo3',
 ]);
 
 export const non6v6Formats: Set<string> = new Set([
@@ -242,4 +245,8 @@ export const non6v6Formats: Set<string> = new Set([
   'gen4vgc2009',
   'gen9challengecup1v1',
   'gen9challengecup2v2',
+  'gen9vgc2026regibo3',
+  'gen9championsbssregma',
+  'gen9championsvgc2026regma',
+  'gen9championsvgc2026regmabo3',
 ]);
