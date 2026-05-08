@@ -94,13 +94,16 @@ function movesetCounter(
   teamtypeArg: string | null,
   usageArg: Record<string, number>
 ): MovesetStuffOutput {
-  const raw = zlib.gunzipSync(fs.readFileSync(filename)).toString('utf-8');
-
-  const chunks = raw.split('][').map((chunk, i, arr) => {
-    if (i > 0) chunk = '[' + chunk;
-    if (i < arr.length - 1) chunk = chunk + ']';
-    return chunk;
-  });
+  const rawBuffer = zlib.gunzipSync(fs.readFileSync(filename));
+  const split = Buffer.from('][');
+  const chunks: Buffer[] = [];
+  let start = 0;
+  let idx: number;
+  while ((idx = rawBuffer.indexOf(split, start)) !== -1) {
+    chunks.push(rawBuffer.subarray(start, idx + 1));
+    start = idx + 1;
+  }
+  chunks.push(rawBuffer.subarray(start));
 
   const species = keyLookup[path.basename(filename)];
   const speciesName = reverseAliases[species] ?? species;
@@ -118,7 +121,7 @@ function movesetCounter(
   let rawCount = 0;
 
   for (const chunk of chunks) {
-    const movesets: MovesetEntry[] = JSON.parse(chunk);
+    const movesets: MovesetEntry[] = JSON.parse(chunk.toString('utf-8'));
     for (const moveset of movesets) {
       if (teamtypeArg && !moveset.tags.includes(teamtypeArg)) continue;
 
