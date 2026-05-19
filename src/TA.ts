@@ -19,9 +19,9 @@ export const types: Record<string, string[]> = JSON.parse(
 
 export function statFormula(base: number, lv: number, nat: number, iv: number, ev: number): number {
   if (nat === -1) { // for HP
-    return Math.floor((iv + 2 * base + ev / 4 + 100) * lv / 100 + 10);
+    return Math.floor(iv + 2 * base + ev / 4 * lv) + lv + 10;
   }
-  return Math.floor(((iv + 2 * base + ev / 4) * lv / 100 + 5) * nat / 10);
+  return Math.floor((Math.floor((iv + 2 * base + ev / 4) * lv / 100) + 5) * nat / 10);
 }
 
 export const nmod: Record<string, number[]> = {
