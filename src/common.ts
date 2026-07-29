@@ -143,6 +143,7 @@ export const aliases: Record<string, string[]> = {
   'Floette-Mega': ['Floetteeternalmega','Floette-Eternal-Mega','Floette-Eternalmega'],
   'Pikachu': ['Pikachu-Cosplay','Pikachu-Belle','Pikachu-Rock-Star','Pikachu-Pop-Star','Pikachu-PhD','Pikachu-Libre','Pikachu-Original','Pikachu-Hoenn','Pikachu-Sinnoh','Pikachu-Unova','Pikachu-Kalos','Pikachu-Alola','Pikachu-Partner','Pikachu-World'],
   'Meowstic': ['Meowstic-F','Meowstic-M','Meowsticf','Meowsticm'],
+  'Meowstic-M-Mega': ['Meowstic-F-Mega', 'Meowsticfmega'],
   'Bisharp': ['Bsharp'],
   'Missingno.': ['MissingNo.','MissingNo','Missingno'],
   'Vivillon': ['Vivillon-Archipelago','Vivillon-Continental','Vivillon-Elegant','Vivillon-Garden','Vivillon-Highplains','Vivillon-Icysnow','Vivillon-Jungle','Vivillon-Marine','Vivillon-Modern','Vivillon-Monsoon','Vivillon-Ocean','Vivillon-Polar','Vivillon-River','Vivillon-Sandstorm','Vivillon-Savanna','Vivillon-Sun','Vivillon-Tundra','Vivillon-Fancy','Vivillon-Pokeball','Vivillonarchipelago','Vivilloncontinental','Vivillonelegant','Vivillongarden','Vivillonhighplains','Vivillonicysnow','Vivillonjungle','Vivillonmarine','Vivillonmodern','Vivillonmonsoon','Vivillonocean','Vivillonpolar','Vivillonriver','Vivillonsandstorm','Vivillonsavanna','Vivillonsun','Vivillontundra','Vivillonfancy','Vivillonpokeball','Vivillon-Icy Snow','Vivillon-High Plains'],
